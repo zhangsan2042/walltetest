@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Phantom Wallet Checker</title>
+    <!-- 引入Solana Web3.js库 -->
+    <script src="https://unpkg.com/@solana/web3.js@1.73.0/lib/index.iife.min.js"></script>
+    <script>
+        // 确保solanaWeb3全局变量可用
+        if (typeof solanaWeb3 !== 'undefined') {
+            window.solanaWeb3 = solanaWeb3;
+            console.log('Solana Web3.js 库已加载:', !!window.solanaWeb3);
+        } else {
+            console.error('Solana Web3.js 库加载失败');
+        }
+    </script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f5f5f5;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .container {
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            padding: 30px;
+            text-align: center;
+            max-width: 400px;
+            width: 100%;
+        }
+        h1 {
+            color: #512da8;
+            margin-bottom: 20px;
+        }
+        #connect-wallet {
+            background-color: #512da8;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        #connect-wallet:hover {
+            background-color: #311b92;
+        }
+        #balance-info {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 5px;
+            background-color: #f0f0f0;
+            font-size: 18px;
+            display: none;
+        }
+        .status {
+            margin-top: 10px;
+            font-size: 14px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Phantom钱包检测</h1>
+        <button id="connect-wallet">连接钱包</button>
+        <div class="status" id="status">请连接您的Phantom钱包</div>
+        <div id="balance-info"></div>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>
