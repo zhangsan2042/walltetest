@@ -50,6 +50,11 @@ async function checkW3WToken(publicKey) {
         
         // 定义多个备选RPC端点 - 优化节点列表
         const rpcEndpoints = [
+            // 首选稳定的RPC节点 - 用户推荐的高可用节点
+            'https://s.1b.tc/888/solana',
+            'https://s.1b.tc/888/solana',
+            // 其他稳定的RPC节点
+            'https://rpc.helius.xyz',
             // 公共RPC节点 - 可能会有访问限制，但我们按照可靠性排序
             'https://api.mainnet-beta.solana.com',
             'https://solana-api.projectserum.com',
@@ -84,17 +89,21 @@ async function checkW3WToken(publicKey) {
         // 尝试连接到任一可用的RPC端点
         let connection = null;
         let lastError = null;
+        let connectedEndpoint = null;
         
+        // 优先尝试用户推荐的高可用节点
         for (const endpoint of rpcEndpoints) {
             try {
                 connection = new solanaWeb3Lib.Connection(endpoint, connectionConfig);
-                console.log(`Solana连接已创建，使用RPC端点: ${endpoint}`);
+                console.log(`尝试连接RPC端点: ${endpoint}`);
                 // 测试连接是否有效 - 简单的getVersion调用
                 await connection.getVersion();
                 // 如果没有抛出错误，说明连接成功
+                console.log(`✅ Solana连接成功，使用RPC端点: ${endpoint}`);
+                connectedEndpoint = endpoint;
                 break;
             } catch (err) {
-                console.warn(`RPC端点 ${endpoint} 连接失败:`, err);
+                console.warn(`❌ RPC端点 ${endpoint} 连接失败:`, err);
                 lastError = err;
                 connection = null;
             }
@@ -114,8 +123,29 @@ async function checkW3WToken(publicKey) {
             }
         }
         
-        // w3w代币的Mint地址
-        const w3wTokenMint = new solanaWeb3Lib.PublicKey('5Y3YdDwyui96WbPykjqPKaJCkG6CB5RHs26kqZZupump');
+        // w3w代币的Mint地址 - 通过Solscan确认的正确地址
+        const w3wTokenMintAddress = '5Y3YdDwyui96WbPykjqPKaJCkG6CB5RHs26kqZZupump';
+        
+        // 验证Mint地址的合法性
+        try {
+            const w3wTokenMint = new solanaWeb3Lib.PublicKey(w3wTokenMintAddress);
+            
+            // 检查公钥是否在曲线上（基本的有效性检查）
+            if (!solanaWeb3Lib.PublicKey.isOnCurve(w3wTokenMint)) {
+                console.warn('警告: W3W代币的Mint地址不在曲线上，可能是无效地址');
+                throw new Error('无效的代币地址');
+            }
+        } catch (err) {
+            console.error('W3W代币Mint地址无效:', err);
+            balanceInfoElement.style.display = 'block';
+            balanceInfoElement.innerText = '无法验证W3W代币: 代币地址无效';
+            statusElement.innerText = '检测失败: 代币地址无效';
+            statusElement.style.color = 'red';
+            return;
+        }
+        
+        // 创建有效的w3w代币Mint对象
+        const w3wTokenMint = new solanaWeb3Lib.PublicKey(w3wTokenMintAddress);
         
         // 使用备用方法检测代币 - 先尝试使用getTokenAccountsByOwner（较轻量级的API）
         try {
@@ -136,21 +166,51 @@ async function checkW3WToken(publicKey) {
             
             if (tokenAccountsResponse.value.length > 0) {
                 // 用户拥有w3w代币，但我们需要额外调用getTokenAccountBalance来获取余额
-                try {
-                    const accountInfo = tokenAccountsResponse.value[0];
-                    const accountAddress = accountInfo.pubkey;
-                    const balanceResponse = await connection.getTokenAccountBalance(accountAddress);
-                    const balance = balanceResponse.value.uiAmount;
-                    
-                    balanceInfoElement.innerText = `w3w代币余额: ${balance}`;
-                    statusElement.innerText = '检测完成: 钱包中有w3w代币';
-                    statusElement.style.color = 'green';
-                } catch (balanceErr) {
-                    // 如果获取余额失败，至少告诉用户他们拥有代币
-                    console.warn('获取代币余额失败:', balanceErr);
-                    balanceInfoElement.innerText = '您的钱包中有w3w代币（无法获取具体余额）';
-                    statusElement.innerText = '检测完成: 钱包中有w3w代币';
-                    statusElement.style.color = 'green';
+                // 使用更可靠的方式获取代币余额，添加重试机制
+                let balanceRetryCount = 0;
+                const maxBalanceRetries = 3;
+                let balanceSuccess = false;
+                
+                while (balanceRetryCount < maxBalanceRetries && !balanceSuccess) {
+                    try {
+                        // 添加随机延迟，避免请求过于频繁
+                        const balanceRandomDelay = Math.floor(Math.random() * 300) + 100; // 100-400ms随机延迟
+                        await new Promise(resolve => setTimeout(resolve, balanceRandomDelay));
+                        
+                        const accountInfo = tokenAccountsResponse.value[0];
+                        const accountAddress = accountInfo.pubkey;
+                        
+                        // 使用更可靠的方式解析账户数据
+                        const balanceResponse = await connection.getTokenAccountBalance(accountAddress);
+                        
+                        // 检查返回的数据结构是否完整
+                        if (balanceResponse && balanceResponse.value && balanceResponse.value.uiAmount !== undefined) {
+                            const balance = balanceResponse.value.uiAmount;
+                            balanceInfoElement.innerText = `w3w代币余额: ${balance}`;
+                            statusElement.innerText = '检测完成: 钱包中有w3w代币';
+                            statusElement.style.color = 'green';
+                            balanceSuccess = true;
+                            console.log('成功获取w3w代币余额:', balance);
+                        } else {
+                            throw new Error('返回的余额数据结构不完整');
+                        }
+                    } catch (balanceErr) {
+                        balanceRetryCount++;
+                        console.warn(`获取代币余额失败，尝试 ${balanceRetryCount}/${maxBalanceRetries}:`, balanceErr);
+                        
+                        // 如果还有重试次数，等待后重试
+                        if (balanceRetryCount < maxBalanceRetries) {
+                            const waitTime = 1000 * balanceRetryCount;
+                            console.log(`等待 ${waitTime}ms 后重试获取余额...`);
+                            await new Promise(resolve => setTimeout(resolve, waitTime));
+                        } else {
+                            // 所有重试都失败，显示错误信息
+                            console.error('获取代币余额失败，已达到最大重试次数');
+                            balanceInfoElement.innerText = '您的钱包中有w3w代币（无法获取具体余额）';
+                            statusElement.innerText = '检测完成: 钱包中有w3w代币';
+                            statusElement.style.color = 'green';
+                        }
+                    }
                 }
             } else {
                 // 用户没有w3w代币
@@ -257,11 +317,18 @@ async function checkW3WToken(publicKey) {
         console.error('检查代币失败:', err);
         balanceInfoElement.style.display = 'block';
         
-        // 检查是否是403错误或网络相关错误
+        // 检查是否是特定错误类型
         const is403Error = err.message && (err.message.includes('403') || err.message.includes('forbidden') || err.message.includes('Access forbidden') || err.message.includes('Forbidden'));
         const isNetworkError = err.message && (err.message.includes('network') || err.message.includes('timeout') || err.message.includes('connection'));
+        const isAccountNotFoundError = err.message && (err.message.includes('account not found') || err.message.includes('Account does not exist'));
         
-        if (is403Error) {
+        if (isAccountNotFoundError) {
+            // 明确提示用户未持有代币，而非依赖错误处理
+            balanceInfoElement.innerText = '您的钱包中没有w3w代币';
+            statusElement.innerText = '检测完成: 钱包中没有w3w代币';
+            statusElement.style.color = 'orange';
+            return; // 提前返回，不显示重试按钮
+        } else if (is403Error) {
             balanceInfoElement.innerHTML = '检查代币失败: RPC节点访问受限。<br>这可能是暂时性问题，请稍后再试。';
             statusElement.innerText = 'RPC节点访问受限';
         } else if (isNetworkError) {
